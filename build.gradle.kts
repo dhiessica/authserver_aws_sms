@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "br.pucpr"
-version = "0.0.4-SNAPSHOT"
+version = "0.0.12-SNAPSHOT"
 
 java {
     toolchain {
@@ -52,6 +52,8 @@ dependencies {
 	testImplementation("io.mockk:mockk:1.14.6")
 	testImplementation("io.kotest:kotest-runner-junit5-jvm:6.0.3")
 	runtimeOnly("io.kotest:kotest-assertions-core:6.0.3")
+
+    implementation("com.amazonaws:aws-java-sdk-sns:1.12.384")
 }
 
 kotlin {

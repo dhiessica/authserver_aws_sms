@@ -4,34 +4,50 @@ import br.pucpr.authserver.exception.BadRequestException
 import br.pucpr.authserver.exception.NotFoundException
 import br.pucpr.authserver.roles.RoleRepository
 import br.pucpr.authserver.security.Jwt
+import br.pucpr.authserver.users.controller.requests.ConfirmationRequest
+import br.pucpr.authserver.users.controller.requests.LoginRequest
 import br.pucpr.authserver.users.controller.responses.LoginResponse
 import br.pucpr.authserver.users.controller.responses.UserResponse
 import org.slf4j.LoggerFactory
-import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.context.annotation.Bean
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
 import kotlin.jvm.optionals.getOrNull
 
 @Service
 class UserService(
     val repository: UserRepository,
     val roleRepository: RoleRepository,
-    val jwt: Jwt
+    val jwt: Jwt,
+    val smsService: SmsService
 ) {
+    private val EXPIRATION_MINUTES = 5L
+    
     fun insert(user: User): User {
-        if (repository.findByEmail(user.email) != null) {
-            throw BadRequestException("User already exists")
+        if (user.email.isNotEmpty() && repository.findByEmail(user.email) != null) {
+            throw BadRequestException("User already exists with this email")
+        }
+        if (user.phone != null && repository.findByPhone(user.phone!!) != null) {
+            throw BadRequestException("User already exists with this phone number")
         }
         return repository.save(user)
             .also { log.info("User inserted: {}", it.id) }
     }
 
-    fun update(id: Long, name: String): User? {
+    fun update(id: Long, name: String?): User? {
         val user = findByIdOrThrow(id)
-        if (user.name == name) return null
-        user.name = name
-        return repository.save(user)
+        
+        var changed = false
+        if (name != null && user.name != name) {
+            user.name = name
+            changed = true
+        }
+        
+        return if (changed) {
+            repository.save(user)
+        } else {
+            null
+        }
     }
 
     fun findAll(dir: SortDir = SortDir.ASC): List<User> = when (dir) {
@@ -68,19 +84,93 @@ class UserService(
         log.info("Granted role {} to user {}", role.name, user.id)
         return true
     }
+    
+    // --- NOVO FLUXO DE LOGIN POR TELEFONE ---
+    /**
+     * Implementa a lógica do POST /users/login (Telefone/UUID).
+     * @return LoginResponse se for Login Direto (200 OK), ou null para Confirmação (202 Accepted).
+     */
+    fun login(request: LoginRequest): LoginResponse? {
+        val phone = request.phone!!
+        val uuid = request.uuid!!
+        
+        val existingUser = repository.findByPhone(phone)
+        
+        if (existingUser != null && existingUser.deviceUuid == uuid && existingUser.isActive) {
+            log.info("Login bem-sucedido por Telefone/UUID para usuário: {}", existingUser.id)
+            return LoginResponse(
+                token = jwt.createToken(existingUser),
+                user = UserResponse(existingUser)
+            )
+        }
 
-    fun login(email: String, password: String): LoginResponse? {
-        val user = repository.findByEmail(email) ?: return null
-        if (user.password != password) return null
+        val userToConfirm = existingUser ?: User(
+            id = null,
+            email = "",
+            password = "",
+            name = "",
+            phone = phone,
+            isActive = false 
+        )
+        
+        val confirmationCode = smsService.generateCode()
+        val expirationTime = LocalDateTime.now().plusMinutes(EXPIRATION_MINUTES)
+        
+        userToConfirm.confirmationCode = confirmationCode
+        userToConfirm.codeExpiration = expirationTime
+        userToConfirm.deviceUuid = uuid 
+        userToConfirm.isActive = false 
 
-        log.info("User logged in. id={}, name={}", user.id, user.name)
+        val savedUser = repository.save(userToConfirm)
+
+        if (!smsService.sendConfirmationSms(savedUser.phone!!, confirmationCode)) {
+            throw BadRequestException("Falha ao enviar o código de confirmação via SMS.")
+        }
+        
+        log.info("Usuário {} requer confirmação. Código enviado.", savedUser.id)
+        return null 
+    }
+    
+    /**
+     * Implementa a lógica do POST /users/confirm.
+     *
+     * @return LoginResponse após confirmação bem-sucedida.
+     */
+    fun confirm(request: ConfirmationRequest): LoginResponse {
+        val phone = request.phone!!
+        val uuid = request.uuid!!
+        val code = request.confirmationCode!!
+        
+        val user = repository.findByPhone(phone)
+        
+        if (user == null || user.deviceUuid != uuid || user.confirmationCode == null) {
+            throw NotFoundException("Usuário ou código de confirmação inválido (404 Not Found)")
+        }
+
+        if (user.confirmationCode != code) {
+            throw BadRequestException("Código de confirmação incorreto.")
+        }
+
+        if (user.codeExpiration != null && LocalDateTime.now().isAfter(user.codeExpiration)) {
+            user.confirmationCode = null
+            user.codeExpiration = null
+            repository.save(user)
+            throw BadRequestException("O código de confirmação expirou.")
+        }
+
+        user.isActive = true
+        user.confirmationCode = null 
+        user.codeExpiration = null
+        user.deviceUuid = uuid 
+        
+        val confirmedUser = repository.save(user)
+        log.info("Confirmação de usuário {} bem-sucedida.", confirmedUser.id)
+
         return LoginResponse(
-            token = jwt.createToken(user),
-            user = UserResponse(user)
+            token = jwt.createToken(confirmedUser),
+            user = UserResponse(confirmedUser)
         )
     }
-
-
 
     companion object {
         private val log = LoggerFactory.getLogger(UserService::class.java)

@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.security.SecurityScheme
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.ConfigurationProperties
-
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.PropertySource
@@ -53,9 +52,12 @@ class SecurityConfig(
             .authorizeHttpRequests { requests ->
                 requests
                     .requestMatchers(antMatcher(HttpMethod.GET)).permitAll()
-                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/users")).permitAll()
-                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/users/login")).permitAll()
+                    .requestMatchers(antMatcher(HttpMethod.POST, "/users")).permitAll()
+                    .requestMatchers(antMatcher(HttpMethod.POST, "/users/login")).permitAll()
+                    .requestMatchers(antMatcher(HttpMethod.POST, "/users/confirm")).permitAll()
                     .requestMatchers(antMatcher("/h2-console/**")).permitAll()
+                    .requestMatchers(antMatcher("/swagger-ui/**")).permitAll()
+                    .requestMatchers(antMatcher("/v3/api-docs/**" )).permitAll()
                     .anyRequest().authenticated()
             }
             .addFilterBefore(jwtTokenFilter, BasicAuthenticationFilter::class.java)

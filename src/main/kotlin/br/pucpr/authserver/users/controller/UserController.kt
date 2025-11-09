@@ -4,6 +4,7 @@ import br.pucpr.authserver.exception.ForbiddenException
 import br.pucpr.authserver.security.UserToken
 import br.pucpr.authserver.users.SortDir
 import br.pucpr.authserver.users.UserService
+import br.pucpr.authserver.users.controller.requests.ConfirmationRequest
 import br.pucpr.authserver.users.controller.requests.CreateUserRequest
 import br.pucpr.authserver.users.controller.requests.LoginRequest
 import br.pucpr.authserver.users.controller.requests.PatchUserRequest
@@ -44,7 +45,7 @@ class UserController(val service: UserService) {
         val token = auth.principal as? UserToken ?: throw ForbiddenException()
         if (token.id != id && !token.isAdmin) throw ForbiddenException()
 
-        return service.update(id, request.name!!)
+        return service.update(id, request.name)
             ?.let { ResponseEntity.ok(UserResponse(it)) }
             ?: ResponseEntity.noContent().build()
     }
@@ -78,9 +79,16 @@ class UserController(val service: UserService) {
             ResponseEntity.noContent().build()
         }
 
+    // --- NOVO: POST /users/login (Telefone/UUID) ---
     @PostMapping("/login")
     fun login(@Valid @RequestBody login: LoginRequest) =
-        service.login(login.email!!, login.password!!)
-            ?.let { ResponseEntity.ok(it) }
-            ?: ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        service.login(login)
+            ?.let { ResponseEntity.ok(it) } // Retorna 200 OK com LoginResponse (Login Direto)
+            ?: ResponseEntity.status(HttpStatus.ACCEPTED).build() // Retorna 202 Accepted (Requer Confirmação)
+
+    // --- NOVO: POST /users/confirm ---
+    @PostMapping("/confirm")
+    fun confirm(@Valid @RequestBody confirm: ConfirmationRequest) =
+        service.confirm(confirm)
+            .let { ResponseEntity.ok(it) } // Retorna 200 OK com LoginResponse
 }
