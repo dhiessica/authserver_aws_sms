@@ -34,12 +34,20 @@ class UserService(
             .also { log.info("User inserted: {}", it.id) }
     }
 
-    fun update(id: Long, name: String?): User? {
+    fun update(id: Long, name: String?, email: String?): User? {
         val user = findByIdOrThrow(id)
-        
         var changed = false
+
         if (name != null && user.name != name) {
             user.name = name
+            changed = true
+        }
+
+        if (email != null && user.email != email) {
+            if (repository.findByEmail(email) != null) {
+                throw BadRequestException("Já existe um usuário com esse email")
+            }
+            user.email = email
             changed = true
         }
         

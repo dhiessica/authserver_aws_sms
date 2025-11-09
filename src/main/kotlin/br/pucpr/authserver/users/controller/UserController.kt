@@ -45,7 +45,7 @@ class UserController(val service: UserService) {
         val token = auth.principal as? UserToken ?: throw ForbiddenException()
         if (token.id != id && !token.isAdmin) throw ForbiddenException()
 
-        return service.update(id, request.name)
+        return service.update(id, request.name, request.email)
             ?.let { ResponseEntity.ok(UserResponse(it)) }
             ?: ResponseEntity.noContent().build()
     }
